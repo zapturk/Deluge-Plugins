@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g. v0.1.0)'
+        required: true
+        type: string
+        default: 'v0.1.0'
+      draft:
+        description: 'Create draft release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools<71" wheel
+
+      - name: Build all Deluge plugin eggs
+        run: python build_all.py
+
+      - name: Verify egg artifacts
+        run: |
+          echo "Built eggs in dist/:"
+          ls -lh dist/
+          egg_count=$(ls -1 dist/*.egg | wc -l)
+          echo "Total egg files built: $egg_count"
+          if [ "$egg_count" -lt 14 ]; then
+            echo "Error: Expected at least 14 eggs, but found $egg_count"
+            exit 1
+          fi
+
+      - name: Upload artifacts to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: deluge-plugin-eggs
+          path: dist/*.egg
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Release ${{ inputs.tag_name || github.ref_name }}
+          files: dist/*.egg
+          generate_release_notes: true
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
+          body: |
+            ### Deluge Plugins Pre-Built Eggs
+
+            This release includes pre-built `.egg` files for both **TorrentFilter** and **TrackerStatus**, supporting Python 2.7 and Python 3.8 through 3.13.
+
+            #### Included Plugins:
+            - **TorrentFilter**: Instant name filter search box with clear button and match counter for Deluge Web UI & GTK UI.
+            - **TrackerStatus**: Adds a dedicated Tracker Status column to the Deluge torrent table.
+
+            #### Installation Instructions:
+            1. Download the `.egg` file matching your Deluge instance's Python version (e.g. `-py3.13.egg` for Deluge running on Python 3.13).
+            2. Copy the `.egg` file into your Deluge plugins folder:
+               - **Linux / macOS:** `~/.config/deluge/plugins/`
+               - **Docker:** mapped `plugins/` volume (e.g. `/config/plugins/`)
+               - **Windows:** `%APPDATA%\deluge\plugins\`
+            3. Restart Deluge (`deluged` / `deluge-web` or your container).
+            4. Enable the plugin under **Preferences** -> **Plugins**.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

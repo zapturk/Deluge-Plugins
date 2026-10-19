@@ -1,0 +1,47 @@
+name: Build CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build & Validate Eggs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools<71" wheel
+
+      - name: Build all Deluge plugin eggs
+        run: python build_all.py
+
+      - name: Verify egg artifacts
+        run: |
+          echo "Built eggs in dist/:"
+          ls -lh dist/
+          egg_count=$(ls -1 dist/*.egg | wc -l)
+          echo "Total egg files built: $egg_count"
+          if [ "$egg_count" -lt 14 ]; then
+            echo "Error: Expected at least 14 eggs, but found $egg_count"
+            exit 1
+          fi
+
+      - name: Upload artifacts to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: deluge-plugin-eggs-ci
+          path: dist/*.egg
+          retention-days: 7
